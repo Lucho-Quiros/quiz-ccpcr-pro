@@ -3,8 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import confetti from "canvas-confetti";
 
 // ════════ CREDENCIALES DIRECTAS ════════
-const SUPABASE_URL = https://ydcbwzsttxpixgcbdupu.supabase.co;
-const SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlkY2J3enN0dHhwaXhnY2JkdXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0NzU5MzYsImV4cCI6MjA5OTA1MTkzNn0.zgZ4VfW_LBdHpO47S1ra2k7g21f_1FwUCpvcdqKJ11o;
+const SUPABASE_URL = "https://ydcbwzsttxpixgcbdupu.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlkY2J3enN0dHhwaXhnY2JkdXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0NzU5MzYsImV4cCI6MjA5OTA1MTkzNn0.zgZ4VfW_LBdHpO47S1ra2k7g21f_1FwUCpvcdqKJ11o";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const QUESTION_TIME = 20; 
