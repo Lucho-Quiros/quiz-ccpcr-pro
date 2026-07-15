@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
+import { motion, AnimatePresence } from "framer-motion";
 import confetti from "canvas-confetti";
 
 // ════════ CREDENCIALES DIRECTAS ════════
@@ -7,431 +9,359 @@ const SUPABASE_URL = "https://ydcbwzsttxpixgcbdupu.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlkY2J3enN0dHhwaXhnY2JkdXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0NzU5MzYsImV4cCI6MjA5OTA1MTkzNn0.zgZ4VfW_LBdHpO47S1ra2k7g21f_1FwUCpvcdqKJ11o";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const QUESTION_TIME = 20; 
 const PALETTE = ["#e8453c", "#1368ce", "#d89e00", "#26890c"];
-const SHAPES = ["▲", "◆", "●", "■"];
-const APP_ORIGIN = typeof window !== "undefined" ? window.location.origin : "";
 
-export default function App() {
-  const isJoin = typeof window !== "undefined" && window.location.pathname.startsWith("/join");
-  return (
-    <>
-      <style>{globalCss}</style>
-      {isJoin ? <Participant /> : <Presenter />}
-    </>
-  );
-}
+const getYouTubeEmbedUrl = (url) => {
+  if (!url) return "";
+  let videoId = "";
+  if (url.includes("youtu.be/")) videoId = url.split("youtu.be/")[1]?.split("?")[0];
+  else if (url.includes("watch?v=")) videoId = url.split("watch?v=")[1]?.split("&")[0];
+  return videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0` : "";
+};
 
-// ════════ HOOK TIEMPO REAL ════════
-function useGame(gameId) {
-  const [game, setGame] = useState(null);
-  const [players, setPlayers] = useState([]);
+// ════════════════════════════════════════════════════════════════════
+//  1. PANTALLA PÚBLICA (Proyector Limpio - Versión Estable sin Video Local)
+// ════════════════════════════════════════════════════════════════════
+function PublicProyector() {
+  const [livePres, setLivePres] = useState(null);
+  const [activeBlocks, setActiveBlocks] = useState([]);
 
   useEffect(() => {
-    if (!gameId) return;
-    let active = true;
-
-    (async () => {
-      const { data: g } = await supabase.from("games").select("*").eq("id", gameId).single();
-      const { data: ps } = await supabase.from("players").select("*").eq("game_id", gameId);
-      if (active) {
-        setGame(g);
-        setPlayers(ps || []);
-      }
-    })();
-
-    const channel = supabase
-      .channel(`game_${gameId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: `id=eq.${gameId}` },
-        (payload) => setGame(payload.new))
-      .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameId}` },
-        () => refreshPlayers(gameId, setPlayers))
-      .subscribe();
-
-    return () => {
-      active = false;
-      supabase.removeChannel(channel);
-    };
-  }, [gameId]);
-
-  return { game, players, setGame };
-}
-
-async function refreshPlayers(gameId, setPlayers) {
-  const { data } = await supabase.from("players").select("*").eq("game_id", gameId).order("score", { ascending: false });
-  setPlayers(data || []);
-}
-
-// ════════ PRESENTADOR ════════
-function Presenter() {
-  const [gameId, setGameId] = useState(null);
-  const { game, players } = useGame(gameId);
-
-  useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase.rpc("create_game");
-      if (!error && data) setGameId(data.id);
-    })();
+    fetchLivePresentation();
+    const presSub = supabase.channel("public-pres-sync")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "presentations" }, (payload) => {
+        if (payload.new.is_live) { setLivePres(payload.new); fetchBlocks(payload.new.id); }
+        else { setLivePres(prev => (prev?.id === payload.new.id ? null : prev)); }
+      }).subscribe();
+    return () => supabase.removeChannel(presSub);
   }, []);
 
-  const setPhase = async (patch) => {
-    await supabase.from("games").update(patch).eq("id", gameId);
-  };
-  const startQuestion = () => setPhase({ phase: "question", question_started_at: new Date().toISOString() });
-  const reveal = () => setPhase({ phase: "reveal" });
-  const next = () => {
-    const isLast = game.q_index >= game.questions.length - 1;
-    if (isLast) setPhase({ phase: "podium" });
-    else setPhase({ phase: "question", q_index: game.q_index + 1, question_started_at: new Date().toISOString() });
-  };
-  const restart = async () => {
-    await supabase.from("players").update({ score: 0, last_answer: null, answered_q: -1 }).eq("game_id", gameId);
-    setPhase({ phase: "lobby", q_index: 0, question_started_at: null });
+  const fetchLivePresentation = async () => {
+    const { data } = await supabase.from("presentations").select("*").eq("is_live", true).single();
+    if (data) { setLivePres(data); fetchBlocks(data.id); }
   };
 
-  if (!game) return <Center>Creando sala…</Center>;
-
-  return (
-    <div style={styles.root}>
-      <div style={styles.stage}>
-        {game.phase === "lobby" && <LobbyPresenter game={game} players={players} onStart={startQuestion} />}
-        {game.phase === "question" && <QuestionPresenter game={game} players={players} onReveal={reveal} />}
-        {game.phase === "reveal" && <RevealPresenter game={game} players={players} onNext={next} />}
-        {game.phase === "podium" && <Podium players={players} onRestart={restart} />}
-      </div>
-    </div>
-  );
-}
-
-function LobbyPresenter({ game, players, onStart }) {
-  const joinUrl = `${APP_ORIGIN}/join?pin=${game.pin}`;
-  const qr = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=0&data=${encodeURIComponent(joinUrl)}`;
-  return (
-    <div className="fade-in" style={styles.lobby}>
-      <div>
-        <p style={styles.kicker}>CURSO PROFESIONAL · SESIÓN EN VIVO</p>
-        <h1 style={styles.lobbyTitle}>Únete a la sala</h1>
-        <p style={styles.lobbySub}>Escanea el QR con tu móvil</p>
-        <div style={styles.codeBox}>
-          <span style={styles.codeLabel}>PIN del juego</span>
-          <span style={styles.codeNum}>{game.pin.replace(/(\d{3})(\d{3})/, "$1 $2")}</span>
-        </div>
-      </div>
-      <div style={styles.lobbyRight}>
-        <div style={styles.qrCard}><img src={qr} alt="QR" width={240} height={240} style={{ display: "block" }} /></div>
-        <div style={styles.playerCount}><strong>{players.length}</strong> {players.length === 1 ? "participante" : "participantes"}</div>
-        <div style={styles.playerChips}>
-          {players.map((p) => <span key={p.id} className="pop-in" style={styles.chip}>{p.name}</span>)}
-        </div>
-        <button onClick={onStart} disabled={players.length === 0} style={{ ...styles.bigBtn, opacity: players.length ? 1 : 0.4 }}>Empezar →</button>
-      </div>
-    </div>
-  );
-}
-
-function QuestionPresenter({ game, players, onReveal }) {
-  const q = game.questions[game.q_index];
-  const [left, setLeft] = useState(QUESTION_TIME);
-  useEffect(() => {
-    const t = setInterval(() => {
-      const elapsed = (Date.now() - new Date(game.question_started_at).getTime()) / 1000;
-      setLeft(Math.max(0, Math.ceil(QUESTION_TIME - elapsed)));
-    }, 250);
-    return () => clearInterval(t);
-  }, [game.question_started_at]);
-  const answered = players.filter((p) => p.answered_q === game.q_index).length;
-  return (
-    <div className="fade-in" style={styles.question}>
-      <div style={styles.qHeader}>
-        <span style={styles.qNum}>Pregunta {game.q_index + 1} / {game.questions.length}</span>
-        <div style={styles.timer}>{left}</div>
-        <span style={styles.qNum}>{answered} respuesta{answered !== 1 ? "s" : ""}</span>
-      </div>
-      <h1 style={styles.qText}>{q.q}</h1>
-      <div style={styles.optGrid}>
-        {q.options.map((o, i) => (
-          <div key={i} style={{ ...styles.optCard, background: PALETTE[i] }}>
-            <span style={styles.optShape}>{SHAPES[i]}</span><span>{o}</span>
-          </div>
-        ))}
-      </div>
-      <button onClick={onReveal} style={styles.ghostBtn}>Mostrar respuesta →</button>
-    </div>
-  );
-}
-
-function RevealPresenter({ game, players, onNext }) {
-  const q = game.questions[game.q_index];
-  const counts = [0, 0, 0, 0];
-  players.forEach((p) => { if (p.answered_q === game.q_index && p.last_answer != null) counts[p.last_answer]++; });
-  const max = Math.max(1, ...counts);
-  const isLast = game.q_index >= game.questions.length - 1;
-  return (
-    <div className="fade-in" style={styles.question}>
-      <h1 style={styles.qText}>{q.q}</h1>
-      <div style={styles.barRow}>
-        {q.options.map((o, i) => (
-          <div key={i} style={styles.barCol}>
-            <div style={{ ...styles.bar, height: `${40 + (counts[i] / max) * 200}px`, background: PALETTE[i], opacity: i === q.correct ? 1 : 0.35 }}>
-              <span style={styles.barCount}>{counts[i]}</span>
-            </div>
-            <div style={{ ...styles.barLabel, fontWeight: i === q.correct ? 800 : 500 }}>{SHAPES[i]} {i === q.correct ? "✓ " : ""}{o}</div>
-          </div>
-        ))}
-      </div>
-      <button onClick={onNext} style={styles.bigBtn}>{isLast ? "Ver podio 🏆" : "Siguiente pregunta →"}</button>
-    </div>
-  );
-}
-
-function Podium({ players, onRestart }) {
-  // Lluvia de confeti global
-  useEffect(() => {
-    confetti({ particleCount: 400, spread: 150, origin: { y: 0.3 } });
-  }, []);
-
-  const ranked = [...players].sort((a, b) => b.score - a.score);
-  const top = ranked.slice(0, 3);
-  const order = [1, 0, 2];
-  const heights = { 0: 220, 1: 160, 2: 120 };
-  const medals = ["🥇", "🥈", "🥉"];
-  return (
-    <div className="fade-in" style={styles.podiumWrap}>
-      <h1 style={styles.podiumTitle}>🏆 Resultados finales</h1>
-      <div style={styles.podiumRow}>
-        {order.map((rank) => top[rank] ? (
-          <div key={rank} className="rise" style={styles.podiumCol}>
-            <span style={styles.podiumMedal}>{medals[rank]}</span>
-            <span style={styles.podiumName}>{top[rank].name}</span>
-            <span style={styles.podiumScore}>{top[rank].score} pts</span>
-            <div style={{ ...styles.podiumBlock, height: heights[rank] }}>{rank + 1}</div>
-          </div>
-        ) : <div key={rank} style={{ width: 140 }} />)}
-      </div>
-      {ranked.length > 3 && (
-        <div style={styles.restList}>
-          {ranked.slice(3).map((p, i) => (
-            <div key={p.id} style={styles.restRow}><span>{i + 4}. {p.name}</span><span>{p.score} pts</span></div>
-          ))}
-        </div>
-      )}
-      <button onClick={onRestart} style={styles.ghostBtn}>Reiniciar juego</button>
-    </div>
-  );
-}
-
-// ════════ PARTICIPANTE (MÓVIL) ════════
-function Participant() {
-  const pin = new URLSearchParams(window.location.search).get("pin") || "";
-  const [gameId, setGameId] = useState(null);
-  const [notFound, setNotFound] = useState(false);
-  const [playerId, setPlayerId] = useState(() => localStorage.getItem(`pid_${pin}`) || null);
-  const [nameInput, setNameInput] = useState("");
-  const [timeLeft, setTimeLeft] = useState(0); 
-
-  const { game, players } = useGame(gameId);
-  const me = players.find((p) => p.id === playerId);
-
-  // Sincronizar temporizador en el celular
-  useEffect(() => {
-    if (game?.phase === "question" && game?.question_started_at) {
-      const t = setInterval(() => {
-        const elapsed = (Date.now() - new Date(game.question_started_at).getTime()) / 1000;
-        setTimeLeft(Math.max(0, Math.ceil(QUESTION_TIME - elapsed)));
-      }, 250);
-      return () => clearInterval(t);
-    }
-  }, [game?.phase, game?.question_started_at]);
-
-  // Lanzar confeti si este jugador gana
-  const isWinner = players.length > 0 && [...players].sort((a, b) => b.score - a.score)[0]?.id === me?.id;
-  useEffect(() => {
-    if (game?.phase === "podium" && isWinner) {
-      confetti({ particleCount: 200, spread: 90, origin: { y: 0.5 } });
-    }
-  }, [game?.phase, isWinner]);
-
-  // Resuelve el PIN limpiando espacios invisibles
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from("games").select("id").eq("pin", pin.trim()).single();
-      if (data) setGameId(data.id);
-      else setNotFound(true);
-    })();
-  }, [pin]);
-
-  const join = async () => {
-    const name = nameInput.trim();
-    if (!name || !gameId) return;
-    const { data } = await supabase.from("players").insert({ game_id: gameId, name }).select().single();
-    if (data) {
-      setPlayerId(data.id);
-      localStorage.setItem(`pid_${pin}`, data.id);
-    }
+  const fetchBlocks = async (presId) => {
+    const { data } = await supabase.from("blocks").select("*").eq("presentation_id", presId).eq("status", "ingresado").order("sort_order", { ascending: true });
+    setActiveBlocks(data || []);
   };
 
-  const answer = async (optIndex) => {
-    if (!me || me.answered_q === game.q_index) return;
-    
-    const q = game.questions[game.q_index];
-    const elapsedMs = Date.now() - new Date(game.question_started_at).getTime();
-    
-    // Bloqueo estricto de respuestas tardías
-    if (elapsedMs > (QUESTION_TIME * 1000)) return;
-
-    const correct = optIndex === q.correct;
-    const speedBonus = Math.max(0, 1000 - Math.floor((elapsedMs / (QUESTION_TIME * 1000)) * 1000));
-    const gained = correct ? 500 + speedBonus : 0;
-    
-    await supabase.from("players")
-      .update({ last_answer: optIndex, answered_q: game.q_index, score: me.score + gained })
-      .eq("id", me.id);
-  };
-
-  if (notFound) return <Center>No se encontró una sala con ese PIN.</Center>;
-  if (!game) return <Center>Conectando…</Center>;
-
-  if (!me) {
+  if (!livePres) {
     return (
-      <div style={styles.participantBg}>
-        <div className="fade-in" style={styles.phone}>
-          <p style={styles.kicker}>UNIRSE AL JUEGO</p>
-          <h2 style={styles.joinH}>Tu nombre</h2>
-          <p style={styles.joinHint}>PIN {pin.replace(/(\d{3})(\d{3})/, "$1 $2")}</p>
-          <input value={nameInput} onChange={(e) => setNameInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && join()} placeholder="Escribe tu nombre…" maxLength={16} style={styles.input} />
-          <button onClick={join} disabled={!nameInput.trim()} style={{ ...styles.joinBtn, opacity: nameInput.trim() ? 1 : 0.4 }}>Entrar</button>
+      <div style={styles.centerWrap}>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ textAlign: "center" }}>
+          <h1 style={{ fontSize: 48, marginBottom: 20 }}>Colegio de Contadores Privados</h1>
+          <p style={{ fontSize: 24, opacity: 0.7 }}>La próxima charla comenzará en breve...</p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  const currentBlock = activeBlocks[livePres.current_block_index];
+
+  return (
+    <div style={{ ...styles.centerWrap, overflow: "hidden" }}>
+      <AnimatePresence mode="wait">
+        {currentBlock ? (
+          <motion.div key={currentBlock.id} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.05 }} transition={{ duration: 0.5 }} style={{ width: "90%", maxWidth: 1200, textAlign: "center" }}>
+            
+            {currentBlock.type === "text" && (
+              <>
+                <h1 style={{ fontSize: 64, color: "#ffcb2d", marginBottom: 40 }}>{currentBlock.content.title}</h1>
+                <p style={{ fontSize: 36, lineHeight: "1.6", whiteSpace: "pre-wrap", textAlign: "left", background: "rgba(255,255,255,0.05)", padding: 40, borderRadius: 20 }}>
+                  {currentBlock.content.body}
+                </p>
+              </>
+            )}
+
+            {currentBlock.type === "video" && (
+              <>
+                <h1 style={{ fontSize: 40, marginBottom: 20 }}>🎬 Video Ilustrativo</h1>
+                <div style={{ width: "100%", height: "65vh", background: "#000", borderRadius: 20, overflow: "hidden", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
+                  {getYouTubeEmbedUrl(currentBlock.content.url) ? (
+                    <iframe width="100%" height="100%" src={getYouTubeEmbedUrl(currentBlock.content.url)} frameBorder="0" allow="autoplay; encrypted-media" allowFullScreen></iframe>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", opacity: 0.5 }}>URL de video inválida o no configurada</div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {currentBlock.type === "quiz" && (
+              <>
+                <h1 style={{ fontSize: 50, marginBottom: 40, color: "#ffcb2d" }}>🎮 ¡Pregunta de Trivia!</h1>
+                <h2 style={{ fontSize: 40, marginBottom: 50 }}>{currentBlock.content.q}</h2>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+                  {currentBlock.content.options?.map((opt, i) => (
+                    <div key={i} style={{ ...styles.adminCard, background: PALETTE[i], padding: 30, fontSize: 32, fontWeight: "bold" }}>{opt}</div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {currentBlock.type === "qna" && (
+              <>
+                <h1 style={{ fontSize: 60, color: "#c9a8ff", marginBottom: 20 }}>💬 Preguntas y Respuestas</h1>
+                <p style={{ fontSize: 32, opacity: 0.8 }}>Abre la aplicación en tu celular y envíanos tus consultas.</p>
+              </>
+            )}
+          </motion.div>
+        ) : (
+          <motion.div key="end" initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ textAlign: "center" }}>
+            <h1 style={{ fontSize: 48 }}>Fin de la presentación</h1>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  2. PANTALLA DE ADMINISTRACIÓN (El "Director de TV")
+// ════════════════════════════════════════════════════════════════════
+function AdminExpositor() {
+  const [pin, setPin] = useState("");
+  const [presentation, setPresentation] = useState(null);
+  const [blocks, setBlocks] = useState([]);
+  const [editingBlock, setEditingBlock] = useState(null);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    const { data } = await supabase.from("presentations").select("*").eq("pin", pin).single();
+    if (data) { setPresentation(data); loadBlocks(data.id); } else alert("PIN incorrecto");
+  };
+
+  const loadBlocks = async (presId) => {
+    const { data } = await supabase.from("blocks").select("*").eq("presentation_id", presId).order("sort_order", { ascending: true });
+    setBlocks(data || []);
+  };
+
+  useEffect(() => {
+    if (!presentation?.id) return;
+    const adminSub = supabase.channel("admin-pres-sync")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "presentations", filter: `id=eq.${presentation.id}` }, (payload) => { 
+        setPresentation(payload.new); 
+      }).subscribe();
+    return () => supabase.removeChannel(adminSub);
+  }, [presentation?.id]);
+
+  const addBlock = async (type) => {
+    if (editingBlock) { alert("Guarda o cancela la diapositiva actual antes de crear una nueva."); return; }
+    let defaultContent = {};
+    if (type === "text") defaultContent = { title: "Nuevo Título", body: "Escribe aquí tu contenido..." };
+    if (type === "video") defaultContent = { url: "" };
+    if (type === "quiz") defaultContent = { q: "Escribe tu pregunta...", options: ["Opción 1", "Opción 2", "Opción 3", "Opción 4"], correct: 0 };
+    if (type === "qna") defaultContent = { title: "Espacio de Preguntas" };
+
+    const newSortOrder = blocks.length > 0 ? Math.max(...blocks.map(b => b.sort_order)) + 1 : 0;
+    const { data } = await supabase.from("blocks").insert({ presentation_id: presentation.id, type, content: defaultContent, status: "pendiente", sort_order: newSortOrder }).select().single();
+    if (data) { setBlocks([...blocks, data]); setEditingBlock(data); }
+  };
+
+  const saveBlockEdits = async () => {
+    await supabase.from("blocks").update({ content: editingBlock.content, status: "ingresado" }).eq("id", editingBlock.id);
+    setEditingBlock(null); loadBlocks(presentation.id);
+  };
+
+  const deleteBlock = async (blockId) => {
+    if (!window.confirm("¿Estás seguro de eliminar esta diapositiva?")) return;
+    await supabase.from("blocks").delete().eq("id", blockId);
+    setEditingBlock(null); loadBlocks(presentation.id);
+  };
+
+  const projectBlock = async (blockId) => {
+    await supabase.from("presentations").update({ is_live: false }).neq("id", presentation.id);
+    const publicBlocks = blocks.filter(b => b.status === "ingresado");
+    const targetIndex = publicBlocks.findIndex(b => b.id === blockId);
+    
+    if (targetIndex !== -1) {
+      await supabase.from("presentations").update({ is_live: true, current_block_index: targetIndex }).eq("id", presentation.id);
+      if (!presentation.is_live) confetti({ particleCount: 150, spread: 80 }); 
+    }
+  };
+
+  const stopProjection = async () => {
+    await supabase.from("presentations").update({ is_live: false }).eq("id", presentation.id);
+  };
+
+  if (!presentation) {
+    return (
+      <div style={styles.centerWrap}>
+        <div style={styles.adminCard}>
+          <h2 style={styles.panelTitle}>Control de Mando</h2>
+          <form onSubmit={handleLogin} style={styles.formGroup}>
+            <input type="text" maxLength={4} placeholder="PIN 4 dígitos" value={pin} onChange={(e) => setPin(e.target.value)} style={styles.adminInput}/>
+            <button type="submit" style={styles.primaryBtn}>Ingresar</button>
+          </form>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={styles.participantBg}>
-      <div style={styles.phone}>
-        <div style={styles.phoneHeader}>
-          <span style={styles.phoneName}>👤 {me.name}</span>
-          {game.phase === "question" && me.answered_q !== game.q_index && (
-            <span style={{ fontWeight: "bold", color: timeLeft <= 3 ? "#e8453c" : "inherit" }}>
-              ⏳ {timeLeft}s
-            </span>
-          )}
-          <span style={styles.phoneScore}>{me.score} pts</span>
+    <div style={styles.dashboardLayout}>
+      <div style={styles.sidebar}>
+        <h3 style={styles.sidebarHeader}>Tus Diapositivas</h3>
+        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+          {blocks.map((b, i) => {
+            const isReady = b.status === "ingresado";
+            const publicIndex = blocks.filter(x => x.status === "ingresado").findIndex(x => x.id === b.id);
+            const isCurrentlyProjected = presentation.is_live && publicIndex === presentation.current_block_index;
+
+            return (
+              <div key={b.id} style={{ ...styles.blockRow, borderLeft: editingBlock?.id === b.id ? "4px solid #ffaa00" : (isCurrentlyProjected ? "4px solid #80ff66" : "4px solid transparent") }}>
+                <div onClick={() => setEditingBlock(b)} style={{ flex: 1, cursor: "pointer" }}>
+                  <span style={styles.rowOrder}>{i + 1}</span>
+                  <p style={styles.rowType}>{b.type.toUpperCase()}</p>
+                  <p style={{ fontSize: 11, opacity: 0.6 }}>{isReady ? "✅ Listo" : "⏳ Borrador"}</p>
+                </div>
+                
+                {isReady && (
+                  <button 
+                    onClick={() => projectBlock(b.id)} 
+                    style={{ ...styles.liveBtn, background: isCurrentlyProjected ? "rgba(128, 255, 102, 0.1)" : "#26890c", border: isCurrentlyProjected ? "1px solid #80ff66" : "1px solid transparent", color: isCurrentlyProjected ? "#80ff66" : "#fff", padding: "8px", fontSize: 12 }}
+                  >
+                    {isCurrentlyProjected ? "🟢 En Pantalla" : "👁️ Proyectar"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
-        {game.phase === "lobby" && (
-          <div style={styles.phoneCenter}><div className="pulse" style={styles.bigEmoji}>✅</div>
-            <p style={styles.phoneMsg}>¡Estás dentro!</p><p style={styles.phoneSub}>Mira la pantalla principal.</p></div>
-        )}
-        {game.phase === "question" && (
-          me.answered_q === game.q_index ? (
-            <div style={styles.phoneCenter}><div className="pulse" style={styles.bigEmoji}>⏳</div>
-              <p style={styles.phoneMsg}>Respuesta enviada</p><p style={styles.phoneSub}>Espera a los demás…</p></div>
-          ) : (
-            <div style={styles.answerGrid}>
-              {game.questions[game.q_index].options.map((_, i) => (
-                <button key={i} onClick={() => answer(i)} style={{ ...styles.answerBtn, background: PALETTE[i] }}>
-                  <span style={styles.answerShape}>{SHAPES[i]}</span>
-                </button>
-              ))}
+        <p style={{ fontSize: 12, color: "#c9a8ff", fontWeight: 700, marginTop: 20, marginBottom: 8 }}>+ Agregar Bloque:</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button onClick={() => addBlock("text")} style={styles.addBtn} disabled={!!editingBlock}>📄 Texto</button>
+          <button onClick={() => addBlock("video")} style={styles.addBtn} disabled={!!editingBlock}>🎬 Video</button>
+          <button onClick={() => addBlock("quiz")} style={styles.addBtn} disabled={!!editingBlock}>🎮 Quiz</button>
+          <button onClick={() => addBlock("qna")} style={styles.addBtn} disabled={!!editingBlock}>💬 Q&A</button>
+        </div>
+      </div>
+
+      <div style={styles.mainContent}>
+        <div style={styles.dashboardHeader}>
+          <h1>{presentation.title}</h1>
+          {presentation.is_live ? (
+            <div style={{ display: "flex", gap: 15, alignItems: "center", background: "rgba(38, 137, 12, 0.15)", padding: "10px 20px", borderRadius: 12, border: "1px solid #26890c" }}>
+              <span style={{ color: "#80ff66", fontWeight: "bold" }}>🟢 PROYECTANDO AL PÚBLICO</span>
+              <button onClick={stopProjection} style={{...styles.cancelBtn, padding: "8px 16px", fontSize: 14}}>⏹️ Apagar Proyector</button>
             </div>
-          )
-        )}
-        {game.phase === "reveal" && (
-          <div style={styles.phoneCenter}>
-            {me.answered_q !== game.q_index ? (
-              <><div className="pop-in" style={styles.bigEmoji}>⏰</div><p style={{ ...styles.phoneMsg, color: "#f5a623" }}>¡Tiempo agotado!</p></>
-            ) : me.last_answer === game.questions[game.q_index].correct ? (
-              <><div className="pop-in" style={styles.bigEmoji}>🎉</div><p style={{ ...styles.phoneMsg, color: "#26890c" }}>¡Correcto!</p></>
-            ) : (
-              <><div className="pop-in" style={styles.bigEmoji}>😕</div><p style={{ ...styles.phoneMsg, color: "#e8453c" }}>Incorrecto</p></>
+          ) : (
+            <span style={{ color: "rgba(255,255,255,0.4)", fontWeight: "bold", padding: "10px 20px", border: "1px dashed rgba(255,255,255,0.2)", borderRadius: 12 }}>⚪️ Proyector Apagado (Sala de Espera)</span>
+          )}
+        </div>
+
+        {editingBlock ? (
+          <div style={styles.editorCard}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 800, color: "#ffcb2d" }}>Editar Diapositiva ({editingBlock.type.toUpperCase()})</h2>
+              <button onClick={() => deleteBlock(editingBlock.id)} style={styles.deleteBtn}>🗑️ Eliminar</button>
+            </div>
+            
+            {editingBlock.type === "text" && (
+              <div style={styles.formGroup}>
+                <label style={{ fontSize: 14, fontWeight: "bold", opacity: 0.8 }}>Título Principal:</label>
+                <input type="text" value={editingBlock.content.title || ""} onChange={(e) => setEditingBlock({...editingBlock, content: { ...editingBlock.content, title: e.target.value }})} style={styles.adminInput} />
+                <label style={{ fontSize: 14, fontWeight: "bold", opacity: 0.8, marginTop: 10 }}>Cuerpo de Texto:</label>
+                <textarea rows="6" value={editingBlock.content.body || ""} onChange={(e) => setEditingBlock({...editingBlock, content: { ...editingBlock.content, body: e.target.value }})} style={{...styles.adminInput, resize: "vertical"}} />
+              </div>
             )}
-            <p style={styles.phoneSub}>{me.score} puntos en total</p>
+            
+            {editingBlock.type === "video" && (
+              <div style={styles.formGroup}>
+                <label style={{ fontSize: 14, fontWeight: "bold", opacity: 0.8 }}>Enlace de YouTube:</label>
+                <input type="text" placeholder="Ej: https://www.youtube.com/watch?v=..." value={editingBlock.content.url || ""} onChange={(e) => setEditingBlock({...editingBlock, content: { ...editingBlock.content, url: e.target.value }})} style={styles.adminInput} />
+                {getYouTubeEmbedUrl(editingBlock.content.url) && (
+                  <div style={{ marginTop: 10, padding: 15, background: "rgba(38, 137, 12, 0.2)", borderRadius: 10, color: "#80ff66", fontSize: 14 }}>✅ Enlace válido y listo para proyectarse.</div>
+                )}
+              </div>
+            )}
+
+            {editingBlock.type === "quiz" && (
+              <div style={styles.formGroup}>
+                <label style={{ fontSize: 14, fontWeight: "bold", opacity: 0.8 }}>Pregunta de Trivia:</label>
+                <input type="text" value={editingBlock.content.q || ""} onChange={(e) => setEditingBlock({...editingBlock, content: { ...editingBlock.content, q: e.target.value }})} style={styles.adminInput} />
+                
+                <label style={{ fontSize: 14, fontWeight: "bold", opacity: 0.8, marginTop: 10 }}>Opciones de Respuesta (Marca la correcta):</label>
+                {editingBlock.content.options?.map((opt, i) => (
+                  <div key={i} style={{ display: "flex", gap: 12, alignItems: "center", background: editingBlock.content.correct === i ? "rgba(255, 255, 255, 0.1)" : "transparent", padding: "8px", borderRadius: "12px" }}>
+                    <input type="radio" name="correctAnswer" checked={editingBlock.content.correct === i} onChange={() => setEditingBlock({...editingBlock, content: { ...editingBlock.content, correct: i }})} style={{ width: 24, height: 24, cursor: "pointer", accentColor: PALETTE[i] }} title="Marcar como respuesta correcta" />
+                    <div style={{ background: PALETTE[i], width: 12, height: 38, borderRadius: 6 }}></div>
+                    <input type="text" value={opt} onChange={(e) => { const nuevasOpciones = [...editingBlock.content.options]; nuevasOpciones[i] = e.target.value; setEditingBlock({...editingBlock, content: { ...editingBlock.content, options: nuevasOpciones }}); }} style={{...styles.adminInput, flex: 1}} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {editingBlock.type === "qna" && (
+              <p style={{ opacity: 0.7, padding: 20 }}>Este bloque abrirá una pantalla de envío de preguntas en el celular del público.</p>
+            )}
+
+            <div style={{ display: "flex", gap: 12, marginTop: 30 }}>
+              <button onClick={saveBlockEdits} style={styles.primaryBtn}>💾 Guardar y Activar Diapositiva</button>
+              <button onClick={() => setEditingBlock(null)} style={styles.cancelBtn}>Cancelar / Cerrar</button>
+            </div>
           </div>
-        )}
-        {game.phase === "podium" && (
-          <div style={styles.phoneCenter}><div className="pop-in" style={styles.bigEmoji}>🏁</div>
-            <p style={styles.phoneMsg}>¡Juego terminado!</p><p style={styles.phoneSub}>Tu puntuación: {me.score} pts</p></div>
+        ) : (
+          <div style={styles.emptyState}>
+            <h2>Panel del Expositor</h2>
+            <p>1. Crea diapositivas en el menú de la izquierda.<br/>2. Edítalas y guárdalas.<br/>3. Presiona "👁️ Proyectar" para enviarlas directamente a la pantalla del público.</p>
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-function Center({ children }) {
-  return <div style={styles.root}><div style={{ ...styles.stage, fontSize: 22, opacity: .8 }}>{children}</div></div>;
+// ════════════════════════════════════════════════════════════════════
+//  3. PANTALLA MÓVIL (Audiencia - Sin Cambios)
+// ════════════════════════════════════════════════════════════════════
+function AudienceMobile() {
+  const [livePres, setLivePres] = useState(null);
+  useEffect(() => {
+    const fetchLive = async () => { const { data } = await supabase.from("presentations").select("*").eq("is_live", true).single(); setLivePres(data); };
+    fetchLive();
+    const sub = supabase.channel("mobile-sync").on("postgres_changes", { event: "UPDATE", schema: "public", table: "presentations" }, (payload) => {
+      if (payload.new.is_live) setLivePres(payload.new); else setLivePres(null);
+    }).subscribe();
+    return () => supabase.removeChannel(sub);
+  }, []);
+
+  if (!livePres) return <div style={styles.centerWrap}><h2>Buscando charla en vivo... 👀</h2></div>;
+  return <div style={styles.centerWrap}><div style={{ textAlign: "center" }}><h3 style={{ color: "#c9a8ff" }}>Conectado a la charla</h3><p style={{ marginTop: 20, fontSize: 18 }}>¡Mira la pantalla principal!</p></div></div>;
 }
 
-// ════════ ESTILOS ════════
-const globalCss = `
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,900&family=Outfit:wght@400;500;700;800&display=swap');
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background:#0d0420; }
-  .fade-in { animation: fadeIn .5s ease both; }
-  .pop-in { animation: popIn .4s cubic-bezier(.2,1.4,.4,1) both; }
-  .rise { animation: rise .6s cubic-bezier(.2,1,.4,1) both; }
-  .pulse { animation: pulse 1.6s ease-in-out infinite; }
-  @keyframes fadeIn { from {opacity:0;transform:translateY(12px);} to {opacity:1;transform:none;} }
-  @keyframes popIn { from {opacity:0;transform:scale(.6);} to {opacity:1;transform:scale(1);} }
-  @keyframes rise { from {opacity:0;transform:translateY(40px);} to {opacity:1;transform:none;} }
-  @keyframes pulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.12);} }
-  button { cursor:pointer; font-family:'Outfit',sans-serif; border:none; transition:transform .12s,filter .12s; }
-  button:hover:not(:disabled){filter:brightness(1.07);} button:active:not(:disabled){transform:scale(.97);}
-`;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/en-vivo" element={<PublicProyector />} />
+        <Route path="/admin" element={<AdminExpositor />} />
+        <Route path="/join" element={<AudienceMobile />} />
+        <Route path="*" element={<PublicProyector />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
 
 const styles = {
-  root: { fontFamily: "'Outfit',sans-serif", minHeight: "100vh", background: "radial-gradient(circle at 20% 10%,#3a1078,#1a0938 55%,#0d0420)", color: "#fff" },
-  stage: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 32 },
-  lobby: { display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 60, maxWidth: 1100, width: "100%", alignItems: "center" },
-  kicker: { fontSize: 13, letterSpacing: 3, color: "#c9a8ff", fontWeight: 700, marginBottom: 14 },
-  lobbyTitle: { fontFamily: "'Fraunces',serif", fontSize: 64, fontWeight: 900, lineHeight: 1, marginBottom: 14 },
-  lobbySub: { fontSize: 18, opacity: .75, marginBottom: 28 },
-  codeBox: { display: "inline-flex", flexDirection: "column", gap: 4, padding: "18px 32px", borderRadius: 18, background: "rgba(255,255,255,.07)", border: "1px solid rgba(255,255,255,.12)" },
-  codeLabel: { fontSize: 12, letterSpacing: 2, opacity: .6 },
-  codeNum: { fontSize: 44, fontWeight: 800, letterSpacing: 4, fontFamily: "'Fraunces',serif" },
-  lobbyRight: { display: "flex", flexDirection: "column", alignItems: "center", gap: 18 },
-  qrCard: { padding: 16, background: "#fff", borderRadius: 20, boxShadow: "0 20px 60px rgba(0,0,0,.4)" },
-  playerCount: { fontSize: 18, opacity: .85 },
-  playerChips: { display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 360, minHeight: 34 },
-  chip: { padding: "6px 14px", borderRadius: 999, background: "rgba(201,168,255,.18)", border: "1px solid rgba(201,168,255,.35)", fontSize: 14, fontWeight: 600 },
-  bigBtn: { padding: "16px 40px", borderRadius: 16, background: "linear-gradient(135deg,#ffcb2d,#ff8a00)", color: "#3a1078", fontSize: 20, fontWeight: 800, boxShadow: "0 10px 30px rgba(255,138,0,.35)" },
-  ghostBtn: { padding: "13px 30px", borderRadius: 14, background: "rgba(255,255,255,.1)", color: "#fff", fontSize: 16, fontWeight: 700, border: "1px solid rgba(255,255,255,.2)", marginTop: 10 },
-  question: { width: "100%", maxWidth: 980, display: "flex", flexDirection: "column", alignItems: "center", gap: 26 },
-  qHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" },
-  qNum: { fontSize: 15, opacity: .7, fontWeight: 600, minWidth: 130 },
-  timer: { width: 78, height: 78, borderRadius: "50%", background: "linear-gradient(135deg,#ffcb2d,#ff8a00)", color: "#3a1078", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, fontWeight: 900, boxShadow: "0 8px 24px rgba(255,138,0,.4)" },
-  qText: { fontFamily: "'Fraunces',serif", fontSize: 40, fontWeight: 900, textAlign: "center", lineHeight: 1.15 },
-  optGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, width: "100%" },
-  optCard: { display: "flex", alignItems: "center", gap: 16, padding: "26px 28px", borderRadius: 16, fontSize: 22, fontWeight: 700, boxShadow: "0 10px 30px rgba(0,0,0,.25)" },
-  optShape: { fontSize: 28 },
-  barRow: { display: "flex", alignItems: "flex-end", gap: 22, width: "100%", justifyContent: "center", minHeight: 280 },
-  barCol: { display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: 200 },
-  bar: { width: "100%", borderRadius: "12px 12px 0 0", display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 10, transition: "height .6s cubic-bezier(.2,1,.4,1)" },
-  barCount: { fontSize: 30, fontWeight: 900 },
-  barLabel: { fontSize: 16, textAlign: "center" },
-  podiumWrap: { display: "flex", flexDirection: "column", alignItems: "center", gap: 26, width: "100%", maxWidth: 800 },
-  podiumTitle: { fontFamily: "'Fraunces',serif", fontSize: 48, fontWeight: 900 },
-  podiumRow: { display: "flex", alignItems: "flex-end", gap: 20, justifyContent: "center" },
-  podiumCol: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: 140 },
-  podiumMedal: { fontSize: 40 },
-  podiumName: { fontSize: 18, fontWeight: 700 },
-  podiumScore: { fontSize: 14, opacity: .7 },
-  podiumBlock: { width: "100%", borderRadius: "12px 12px 0 0", background: "linear-gradient(180deg,#c9a8ff,#7b2ff7)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, fontWeight: 900, color: "rgba(255,255,255,.5)" },
-  restList: { width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 6 },
-  restRow: { display: "flex", justifyContent: "space-between", padding: "10px 18px", borderRadius: 10, background: "rgba(255,255,255,.06)", fontSize: 15 },
-  participantBg: { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, gap: 16, background: "radial-gradient(circle at 20% 10%,#3a1078,#1a0938 55%,#0d0420)", color: "#fff", fontFamily: "'Outfit',sans-serif" },
-  phone: { width: "100%", maxWidth: 420, minHeight: 520, background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 28, padding: 24, display: "flex", flexDirection: "column", boxShadow: "0 24px 70px rgba(0,0,0,.45)" },
-  joinH: { fontFamily: "'Fraunces',serif", fontSize: 34, fontWeight: 900, marginBottom: 6 },
-  joinHint: { fontSize: 13, opacity: .6, marginBottom: 24 },
-  input: { padding: "16px 18px", borderRadius: 14, border: "1px solid rgba(255,255,255,.2)", background: "rgba(255,255,255,.08)", color: "#fff", fontSize: 18, fontFamily: "'Outfit',sans-serif", outline: "none", marginBottom: 16 },
-  joinBtn: { padding: "16px", borderRadius: 14, background: "linear-gradient(135deg,#ffcb2d,#ff8a00)", color: "#3a1078", fontSize: 18, fontWeight: 800 },
-  phoneHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 16, borderBottom: "1px solid rgba(255,255,255,.1)", marginBottom: 8 },
-  phoneName: { fontSize: 15, fontWeight: 700 },
-  phoneScore: { fontSize: 15, fontWeight: 800, color: "#ffcb2d" },
-  phoneCenter: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, textAlign: "center" },
-  bigEmoji: { fontSize: 64 },
-  phoneMsg: { fontSize: 26, fontWeight: 800, fontFamily: "'Fraunces',serif" },
-  phoneSub: { fontSize: 15, opacity: .7, maxWidth: 240 },
-  answerGrid: { flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, paddingTop: 14 },
-  answerBtn: { borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 110, boxShadow: "0 8px 24px rgba(0,0,0,.3)" },
-  answerShape: { fontSize: 46, color: "#fff" },
+  centerWrap: { fontFamily: "'Outfit', sans-serif", minHeight: "100vh", background: "radial-gradient(circle at 20% 10%,#3a1078,#1a0938 55%,#0d0420)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 },
+  adminCard: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 24, padding: 40, maxWidth: 420, width: "100%" },
+  panelTitle: { fontSize: 32, fontWeight: 800, marginBottom: 24 },
+  formGroup: { display: "flex", flexDirection: "column", gap: 16 },
+  adminInput: { width: "100%", padding: "14px 18px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)", color: "#fff", fontSize: 16, fontFamily: "inherit" },
+  primaryBtn: { padding: "14px 24px", borderRadius: 12, background: "linear-gradient(135deg,#ffcb2d,#ff8a00)", color: "#3a1078", fontSize: 16, fontWeight: 800, cursor: "pointer", border: "none" },
+  cancelBtn: { padding: "14px 24px", borderRadius: 12, background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer", border: "none" },
+  deleteBtn: { padding: "10px 16px", borderRadius: 8, background: "rgba(232, 69, 60, 0.15)", color: "#ff827a", border: "1px solid rgba(232, 69, 60, 0.4)", fontSize: 14, fontWeight: 600, cursor: "pointer" },
+  dashboardLayout: { fontFamily: "'Outfit', sans-serif", minHeight: "100vh", background: "#0d0420", color: "#fff", display: "grid", gridTemplateColumns: "320px 1fr" },
+  sidebar: { background: "rgba(255,255,255,0.03)", borderRight: "1px solid rgba(255,255,255,0.08)", padding: 24, display: "flex", flexDirection: "column" },
+  sidebarHeader: { fontSize: 18, fontWeight: 700, marginBottom: 16, color: "#c9a8ff" },
+  blockRow: { display: "flex", alignItems: "center", gap: 12, padding: 12, borderRadius: 10, background: "rgba(255,255,255,0.08)", marginBottom: 8 },
+  rowOrder: { fontSize: 18, fontWeight: 800, opacity: 0.4 },
+  rowType: { fontSize: 14, fontWeight: 700 },
+  addBtn: { padding: "10px", background: "rgba(255,255,255,0.06)", color: "#fff", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", border: "none", textAlign: "left" },
+  mainContent: { padding: 40, display: "flex", flexDirection: "column", gap: 24, height: "100vh", overflowY: "auto" },
+  dashboardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: 20 },
+  liveBtn: { borderRadius: 8, fontWeight: 700, cursor: "pointer", transition: "all 0.2s" },
+  editorCard: { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 32 },
+  emptyState: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", border: "2px dashed rgba(255,255,255,0.1)", borderRadius: 16, color: "rgba(255,255,255,0.4)" }
 };
