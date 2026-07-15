@@ -46,16 +46,12 @@ function PublicProyector() {
     setActiveBlocks(data || []);
   };
 
-  // --- AJUSTE VISUAL FINO: Texto más pequeño y más abajo ---
   if (!livePres) {
     return (
       <div style={{ ...styles.centerWrap, position: "relative", padding: 0, overflow: "hidden" }}>
-        {/* El reproductor de fondo leyendo desde Supabase */}
         <video autoPlay loop muted playsInline style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }}>
           <source src="https://ydcbwzsttxpixgcbdupu.supabase.co/storage/v1/object/public/recursos/intro.mp4" type="video/mp4" />
         </video>
-        
-        {/* La caja de texto ahora en bottom: 40 y fontSize: 30 */}
         <div style={{ position: "absolute", bottom: 40, zIndex: 1, background: "rgba(0,0,0,0.6)", padding: "15px 40px", borderRadius: 20, textAlign: "center", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}>
           <p style={{ fontSize: 30, fontWeight: 700, margin: 0, color: "#ffcb2d", letterSpacing: "1px" }}>La charla pronto dará inicio</p>
         </div>
@@ -85,7 +81,8 @@ function PublicProyector() {
                 <h1 style={{ fontSize: 40, marginBottom: 20 }}>🎬 Video Ilustrativo</h1>
                 <div style={{ width: "100%", height: "65vh", background: "#000", borderRadius: 20, overflow: "hidden", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
                   {getYouTubeEmbedUrl(currentBlock.content.url) ? (
-                    <iframe width="100%" height="100%" src={getYouTubeEmbedUrl(currentBlock.content.url)} frameBorder="0" allow="autoplay; encrypted-media" allowFullScreen></iframe>
+                    {/* IMPLEMENTACIÓN DE AUTOPLAY (Máximos permisos) */}
+                    <iframe width="100%" height="100%" src={getYouTubeEmbedUrl(currentBlock.content.url)} frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen></iframe>
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", opacity: 0.5 }}>URL de video inválida o no configurada</div>
                   )}
@@ -190,6 +187,14 @@ function AdminExpositor() {
     await supabase.from("presentations").update({ is_live: false }).eq("id", presentation.id);
   };
 
+  // --- FUNCIÓN SEGURA PARA EDITAR EL TÍTULO ---
+  const editTitle = async () => {
+    const newTitle = window.prompt("Escribe el nuevo título de la charla:", presentation.title);
+    if (newTitle !== null && newTitle.trim() !== "") {
+      await supabase.from("presentations").update({ title: newTitle }).eq("id", presentation.id);
+    }
+  };
+
   if (!presentation) {
     return (
       <div style={styles.centerWrap}>
@@ -245,7 +250,11 @@ function AdminExpositor() {
 
       <div style={styles.mainContent}>
         <div style={styles.dashboardHeader}>
-          <h1>{presentation.title}</h1>
+          {/* AQUÍ ESTÁ EL TÍTULO EDITABLE */}
+          <h1 onClick={editTitle} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }} title="Haz clic para editar el título">
+            {presentation.title} <span style={{ fontSize: 20, opacity: 0.5 }}>✏️</span>
+          </h1>
+          
           {presentation.is_live ? (
             <div style={{ display: "flex", gap: 15, alignItems: "center", background: "rgba(38, 137, 12, 0.15)", padding: "10px 20px", borderRadius: 12, border: "1px solid #26890c" }}>
               <span style={{ color: "#80ff66", fontWeight: "bold" }}>🟢 PROYECTANDO AL PÚBLICO</span>
