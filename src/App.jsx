@@ -333,13 +333,12 @@ function AdminExpositor() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  3. PANTALLA MÓVIL (Audiencia - EL CEREBRO ACTIVO)
+//  3. PANTALLA MÓVIL (Audiencia - CON ALARMA DE ERRORES)
 // ════════════════════════════════════════════════════════════════════
 function AudienceMobile() {
   const [livePres, setLivePres] = useState(null);
   const [activeBlocks, setActiveBlocks] = useState([]);
   
-  // NUEVOS ESTADOS: El texto de la pregunta y la memoria del celular
   const [qnaText, setQnaText] = useState("");
   const [submittedBlocks, setSubmittedBlocks] = useState({});
 
@@ -368,20 +367,25 @@ function AudienceMobile() {
     setActiveBlocks(data || []);
   };
 
-  // --- LA NUEVA FUNCIÓN: Enviar datos al buzón de Supabase ---
+  // --- LA FUNCIÓN CON ALARMA INTEGRADA ---
   const sendResponse = async (block, type, content) => {
-    if (!content && type === "qna") return; // Evitar enviar preguntas en blanco
+    if (!content && type === "qna") return; 
     
-    await supabase.from("responses").insert({
+    const { error } = await supabase.from("responses").insert({
       presentation_id: livePres.id,
       block_id: block.id,
       type: type,
       content: String(content)
     });
 
-    // Guardar en la memoria que ya respondimos a esta diapositiva
+    // ¡Si el guardia de seguridad u otra cosa bloquea el mensaje, lo veremos aquí!
+    if (error) {
+      alert("🚨 Error de base de datos: " + error.message);
+      return; 
+    }
+
     setSubmittedBlocks(prev => ({ ...prev, [block.id]: true }));
-    setQnaText(""); // Limpiar la caja de texto
+    setQnaText(""); 
   };
 
   if (!livePres) {
@@ -408,8 +412,6 @@ function AudienceMobile() {
     );
   }
 
-  // --- NUEVA PANTALLA: "Gracias por participar" ---
-  // Si el usuario ya metió la carta al buzón para esta diapositiva, le mostramos esto:
   if (submittedBlocks[currentBlock.id]) {
     return (
       <div style={styles.centerWrap}>
@@ -431,7 +433,7 @@ function AudienceMobile() {
             {currentBlock.content.options?.map((opt, i) => (
               <button 
                 key={i} 
-                onClick={() => sendResponse(currentBlock, "quiz", i)} // Al hacer clic, enviamos la respuesta
+                onClick={() => sendResponse(currentBlock, "quiz", i)}
                 style={{ ...styles.primaryBtn, background: PALETTE[i], color: "#fff", fontSize: 20, padding: "20px", borderRadius: 16, border: "none", boxShadow: "0 4px 15px rgba(0,0,0,0.2)" }}
               >
                 {opt}
@@ -455,9 +457,9 @@ function AudienceMobile() {
             style={{ ...styles.adminInput, minHeight: 120, resize: "vertical", marginBottom: 20 }} 
           />
           <button 
-            onClick={() => sendResponse(currentBlock, "qna", qnaText)} // Al hacer clic, enviamos el texto
+            onClick={() => sendResponse(currentBlock, "qna", qnaText)} 
             style={{ ...styles.primaryBtn, width: "100%", opacity: qnaText.trim() === "" ? 0.5 : 1 }}
-            disabled={qnaText.trim() === ""} // Desactivado si está vacío
+            disabled={qnaText.trim() === ""} 
           >
             Enviar Pregunta
           </button>
