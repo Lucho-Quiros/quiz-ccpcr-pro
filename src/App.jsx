@@ -46,7 +46,7 @@ function PublicProyector() {
     setActiveBlocks(data || []);
   };
 
-  // --- AJUSTE VISUAL: Video limpio con texto inferior ---
+  // --- AJUSTE VISUAL FINO: Texto más pequeño y más abajo ---
   if (!livePres) {
     return (
       <div style={{ ...styles.centerWrap, position: "relative", padding: 0, overflow: "hidden" }}>
@@ -55,9 +55,9 @@ function PublicProyector() {
           <source src="https://ydcbwzsttxpixgcbdupu.supabase.co/storage/v1/object/public/recursos/intro.mp4" type="video/mp4" />
         </video>
         
-        {/* El texto centrado en la parte inferior */}
-        <div style={{ position: "absolute", bottom: 80, zIndex: 1, background: "rgba(0,0,0,0.6)", padding: "20px 50px", borderRadius: 20, textAlign: "center", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}>
-          <p style={{ fontSize: 36, fontWeight: 700, margin: 0, color: "#ffcb2d", letterSpacing: "1px" }}>La charla pronto dará inicio</p>
+        {/* La caja de texto ahora en bottom: 40 y fontSize: 30 */}
+        <div style={{ position: "absolute", bottom: 40, zIndex: 1, background: "rgba(0,0,0,0.6)", padding: "15px 40px", borderRadius: 20, textAlign: "center", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          <p style={{ fontSize: 30, fontWeight: 700, margin: 0, color: "#ffcb2d", letterSpacing: "1px" }}>La charla pronto dará inicio</p>
         </div>
       </div>
     );
