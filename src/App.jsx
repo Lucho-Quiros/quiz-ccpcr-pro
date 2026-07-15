@@ -46,7 +46,6 @@ function PublicProyector() {
     setActiveBlocks(data || []);
   };
 
-  // --- AJUSTE VISUAL: Pantalla de espera 100% limpia (solo video) ---
   if (!livePres) {
     return (
       <div style={{ ...styles.centerWrap, position: "relative", padding: 0, overflow: "hidden" }}>
@@ -108,7 +107,7 @@ function PublicProyector() {
           </motion.div>
         ) : (
           <motion.div key="end" initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ textAlign: "center" }}>
-            <h1 style={{ fontSize: 48 }}>Fin de la presentation</h1>
+            <h1 style={{ fontSize: 48 }}>Fin de la presentación</h1>
           </motion.div>
         )}
       </AnimatePresence>
@@ -124,8 +123,6 @@ function AdminExpositor() {
   const [presentation, setPresentation] = useState(null);
   const [blocks, setBlocks] = useState([]);
   const [editingBlock, setEditingBlock] = useState(null);
-  
-  // ESTADOS NUEVOS PARA EL TÍTULO EDITABLE
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [tempTitle, setTempTitle] = useState("");
 
@@ -188,10 +185,9 @@ function AdminExpositor() {
     await supabase.from("presentations").update({ is_live: false }).eq("id", presentation.id);
   };
 
-  // --- FUNCIÓN MEJORADA: Guardar Título en Línea ---
   const saveTitle = async () => {
     if (tempTitle.trim() !== "" && tempTitle !== presentation.title) {
-      setPresentation({ ...presentation, title: tempTitle }); // Actualización visual instantánea
+      setPresentation({ ...presentation, title: tempTitle }); 
       await supabase.from("presentations").update({ title: tempTitle }).eq("id", presentation.id);
     }
     setIsEditingTitle(false);
@@ -252,29 +248,14 @@ function AdminExpositor() {
 
       <div style={styles.mainContent}>
         <div style={styles.dashboardHeader}>
-          
-          {/* EL NUEVO SISTEMA DE TÍTULO EDITABLE EN LÍNEA */}
           {isEditingTitle ? (
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <input 
-                type="text" 
-                value={tempTitle} 
-                onChange={(e) => setTempTitle(e.target.value)} 
-                style={{ ...styles.adminInput, width: "350px", fontSize: 24, fontWeight: "bold", padding: "8px 16px" }} 
-                autoFocus 
-                onKeyDown={(e) => e.key === 'Enter' && saveTitle()}
-              />
+              <input type="text" value={tempTitle} onChange={(e) => setTempTitle(e.target.value)} style={{ ...styles.adminInput, width: "350px", fontSize: 24, fontWeight: "bold", padding: "8px 16px" }} autoFocus onKeyDown={(e) => e.key === 'Enter' && saveTitle()} />
               <button onClick={saveTitle} style={{ ...styles.primaryBtn, padding: "10px 15px", fontSize: 14 }}>Guardar</button>
               <button onClick={() => setIsEditingTitle(false)} style={{ ...styles.cancelBtn, padding: "10px 15px", fontSize: 14 }}>Cancelar</button>
             </div>
           ) : (
-            <h1 
-              onClick={() => { setTempTitle(presentation.title); setIsEditingTitle(true); }} 
-              style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 12, transition: "opacity 0.2s" }} 
-              title="Haz clic para editar el título"
-              onMouseEnter={(e) => e.currentTarget.style.opacity = "0.8"}
-              onMouseLeave={(e) => e.currentTarget.style.opacity = "1"}
-            >
+            <h1 onClick={() => { setTempTitle(presentation.title); setIsEditingTitle(true); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 12, transition: "opacity 0.2s" }} title="Haz clic para editar el título" onMouseEnter={(e) => e.currentTarget.style.opacity = "0.8"} onMouseLeave={(e) => e.currentTarget.style.opacity = "1"}>
               {presentation.title} <span style={{ fontSize: 20, opacity: 0.5 }}>✏️</span>
             </h1>
           )}
@@ -352,21 +333,93 @@ function AdminExpositor() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  3. PANTALLA MÓVIL (Audiencia - Sin Cambios)
+//  3. PANTALLA MÓVIL (Audiencia - AHORA MUTANTE)
 // ════════════════════════════════════════════════════════════════════
 function AudienceMobile() {
   const [livePres, setLivePres] = useState(null);
+  const [activeBlocks, setActiveBlocks] = useState([]);
+
   useEffect(() => {
-    const fetchLive = async () => { const { data } = await supabase.from("presentations").select("*").eq("is_live", true).single(); setLivePres(data); };
-    fetchLive();
-    const sub = supabase.channel("mobile-sync").on("postgres_changes", { event: "UPDATE", schema: "public", table: "presentations" }, (payload) => {
-      if (payload.new.is_live) setLivePres(payload.new); else setLivePres(null);
-    }).subscribe();
+    fetchLivePresentation();
+    const sub = supabase.channel("mobile-sync")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "presentations" }, (payload) => {
+        if (payload.new.is_live) { 
+          setLivePres(payload.new); 
+          fetchBlocks(payload.new.id); 
+        } else { 
+          setLivePres(null); 
+          setActiveBlocks([]);
+        }
+      }).subscribe();
     return () => supabase.removeChannel(sub);
   }, []);
 
-  if (!livePres) return <div style={styles.centerWrap}><h2>Buscando charla en vivo... 👀</h2></div>;
-  return <div style={styles.centerWrap}><div style={{ textAlign: "center" }}><h3 style={{ color: "#c9a8ff" }}>Conectado a la charla</h3><p style={{ marginTop: 20, fontSize: 18 }}>¡Mira la pantalla principal!</p></div></div>;
+  const fetchLivePresentation = async () => {
+    const { data } = await supabase.from("presentations").select("*").eq("is_live", true).single();
+    if (data) { setLivePres(data); fetchBlocks(data.id); }
+  };
+
+  const fetchBlocks = async (presId) => {
+    const { data } = await supabase.from("blocks").select("*").eq("presentation_id", presId).eq("status", "ingresado").order("sort_order", { ascending: true });
+    setActiveBlocks(data || []);
+  };
+
+  // ESTADO 1: No hay charla viva
+  if (!livePres) {
+    return (
+      <div style={styles.centerWrap}>
+        <div style={{ textAlign: "center", padding: 20 }}>
+          <h2 style={{ fontSize: 32, color: "#ffcb2d", marginBottom: 15 }}>Buscando charla... 👀</h2>
+          <p style={{ opacity: 0.7, fontSize: 18 }}>Por favor, espera a que el expositor inicie la presentación.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const currentBlock = activeBlocks[livePres.current_block_index];
+
+  // ESTADO 2: Diapositiva de Texto o Video (El celular se queda inactivo pidiendo ver la pantalla)
+  if (!currentBlock || currentBlock.type === "text" || currentBlock.type === "video") {
+    return (
+      <div style={styles.centerWrap}>
+        <div style={{ textAlign: "center", padding: 20 }}>
+          <h3 style={{ color: "#c9a8ff", fontSize: 28, marginBottom: 15 }}>Conectado a la charla</h3>
+          <p style={{ fontSize: 20 }}>👀 Por favor, presta atención a la pantalla principal.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ESTADO 3: ¡ES UN QUIZ! (El celular muestra los 4 botones de colores)
+  if (currentBlock.type === "quiz") {
+    return (
+      <div style={styles.centerWrap}>
+        <div style={{ width: "100%", maxWidth: 400, padding: 20, textAlign: "center" }}>
+          <h2 style={{ color: "#ffcb2d", fontSize: 28, marginBottom: 30 }}>¡Tu turno de votar!</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {currentBlock.content.options?.map((opt, i) => (
+              <button key={i} style={{ ...styles.primaryBtn, background: PALETTE[i], color: "#fff", fontSize: 20, padding: "20px", borderRadius: 16, border: "none", boxShadow: "0 4px 15px rgba(0,0,0,0.2)" }}>
+                {opt}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ESTADO 4: ¡ES PREGUNTAS Y RESPUESTAS! (El celular muestra el formulario)
+  if (currentBlock.type === "qna") {
+    return (
+      <div style={styles.centerWrap}>
+        <div style={{ width: "100%", maxWidth: 400, padding: 20 }}>
+          <h2 style={{ color: "#c9a8ff", fontSize: 28, marginBottom: 20, textAlign: "center" }}>Envía tu consulta</h2>
+          <textarea placeholder="Escribe tu pregunta para el expositor aquí..." style={{ ...styles.adminInput, minHeight: 120, resize: "vertical", marginBottom: 20 }} />
+          <button style={{ ...styles.primaryBtn, width: "100%" }}>Enviar Pregunta</button>
+        </div>
+      </div>
+    );
+  }
 }
 
 export default function App() {
