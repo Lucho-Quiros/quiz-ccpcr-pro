@@ -20,7 +20,7 @@ const getYouTubeEmbedUrl = (url) => {
 };
 
 // ════════════════════════════════════════════════════════════════════
-//  1. PANTALLA PÚBLICA (Proyector Limpio - Versión Estable sin Video Local)
+//  1. PANTALLA PÚBLICA (Proyector Limpio con Video de Espera)
 // ════════════════════════════════════════════════════════════════════
 function PublicProyector() {
   const [livePres, setLivePres] = useState(null);
@@ -46,13 +46,20 @@ function PublicProyector() {
     setActiveBlocks(data || []);
   };
 
+  // --- LA MAGIA DEL VIDEO EN LA SALA DE ESPERA ---
   if (!livePres) {
     return (
-      <div style={styles.centerWrap}>
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ textAlign: "center" }}>
-          <h1 style={{ fontSize: 48, marginBottom: 20 }}>Colegio de Contadores Privados</h1>
-          <p style={{ fontSize: 24, opacity: 0.7 }}>La próxima charla comenzará en breve...</p>
-        </motion.div>
+      <div style={{ ...styles.centerWrap, position: "relative", padding: 0, overflow: "hidden" }}>
+        {/* El reproductor de fondo leyendo desde Supabase */}
+        <video autoPlay loop muted playsInline style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }}>
+          <source src="https://ydcbwzsttxpixgcbdupu.supabase.co/storage/v1/object/public/recursos/intro.mp4" type="video/mp4" />
+        </video>
+        
+        {/* El texto superior con fondo oscurecido para que resalte */}
+        <div style={{ position: "relative", zIndex: 1, background: "rgba(0,0,0,0.6)", padding: "40px 60px", borderRadius: 20, textAlign: "center", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          <h1 style={{ fontSize: 48, marginBottom: 20, color: "#fff" }}>Colegio de Contadores Privados</h1>
+          <p style={{ fontSize: 24, opacity: 0.9, color: "#ffcb2d" }}>Esperando inicio de la charla...</p>
+        </div>
       </div>
     );
   }
