@@ -333,11 +333,15 @@ function AdminExpositor() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  3. PANTALLA MÓVIL (Audiencia - AHORA MUTANTE)
+//  3. PANTALLA MÓVIL (Audiencia - EL CEREBRO ACTIVO)
 // ════════════════════════════════════════════════════════════════════
 function AudienceMobile() {
   const [livePres, setLivePres] = useState(null);
   const [activeBlocks, setActiveBlocks] = useState([]);
+  
+  // NUEVOS ESTADOS: El texto de la pregunta y la memoria del celular
+  const [qnaText, setQnaText] = useState("");
+  const [submittedBlocks, setSubmittedBlocks] = useState({});
 
   useEffect(() => {
     fetchLivePresentation();
@@ -364,7 +368,22 @@ function AudienceMobile() {
     setActiveBlocks(data || []);
   };
 
-  // ESTADO 1: No hay charla viva
+  // --- LA NUEVA FUNCIÓN: Enviar datos al buzón de Supabase ---
+  const sendResponse = async (block, type, content) => {
+    if (!content && type === "qna") return; // Evitar enviar preguntas en blanco
+    
+    await supabase.from("responses").insert({
+      presentation_id: livePres.id,
+      block_id: block.id,
+      type: type,
+      content: String(content)
+    });
+
+    // Guardar en la memoria que ya respondimos a esta diapositiva
+    setSubmittedBlocks(prev => ({ ...prev, [block.id]: true }));
+    setQnaText(""); // Limpiar la caja de texto
+  };
+
   if (!livePres) {
     return (
       <div style={styles.centerWrap}>
@@ -378,7 +397,6 @@ function AudienceMobile() {
 
   const currentBlock = activeBlocks[livePres.current_block_index];
 
-  // ESTADO 2: Diapositiva de Texto o Video (El celular se queda inactivo pidiendo ver la pantalla)
   if (!currentBlock || currentBlock.type === "text" || currentBlock.type === "video") {
     return (
       <div style={styles.centerWrap}>
@@ -390,7 +408,20 @@ function AudienceMobile() {
     );
   }
 
-  // ESTADO 3: ¡ES UN QUIZ! (El celular muestra los 4 botones de colores)
+  // --- NUEVA PANTALLA: "Gracias por participar" ---
+  // Si el usuario ya metió la carta al buzón para esta diapositiva, le mostramos esto:
+  if (submittedBlocks[currentBlock.id]) {
+    return (
+      <div style={styles.centerWrap}>
+        <div style={{ textAlign: "center", padding: 20 }}>
+          <h2 style={{ fontSize: 50, marginBottom: 20 }}>✅</h2>
+          <h3 style={{ color: "#80ff66", fontSize: 28, marginBottom: 15 }}>¡Enviado con éxito!</h3>
+          <p style={{ fontSize: 18, opacity: 0.8 }}>Gracias por tu participación. Atento a la pantalla principal.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (currentBlock.type === "quiz") {
     return (
       <div style={styles.centerWrap}>
@@ -398,7 +429,11 @@ function AudienceMobile() {
           <h2 style={{ color: "#ffcb2d", fontSize: 28, marginBottom: 30 }}>¡Tu turno de votar!</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {currentBlock.content.options?.map((opt, i) => (
-              <button key={i} style={{ ...styles.primaryBtn, background: PALETTE[i], color: "#fff", fontSize: 20, padding: "20px", borderRadius: 16, border: "none", boxShadow: "0 4px 15px rgba(0,0,0,0.2)" }}>
+              <button 
+                key={i} 
+                onClick={() => sendResponse(currentBlock, "quiz", i)} // Al hacer clic, enviamos la respuesta
+                style={{ ...styles.primaryBtn, background: PALETTE[i], color: "#fff", fontSize: 20, padding: "20px", borderRadius: 16, border: "none", boxShadow: "0 4px 15px rgba(0,0,0,0.2)" }}
+              >
                 {opt}
               </button>
             ))}
@@ -408,14 +443,24 @@ function AudienceMobile() {
     );
   }
 
-  // ESTADO 4: ¡ES PREGUNTAS Y RESPUESTAS! (El celular muestra el formulario)
   if (currentBlock.type === "qna") {
     return (
       <div style={styles.centerWrap}>
         <div style={{ width: "100%", maxWidth: 400, padding: 20 }}>
           <h2 style={{ color: "#c9a8ff", fontSize: 28, marginBottom: 20, textAlign: "center" }}>Envía tu consulta</h2>
-          <textarea placeholder="Escribe tu pregunta para el expositor aquí..." style={{ ...styles.adminInput, minHeight: 120, resize: "vertical", marginBottom: 20 }} />
-          <button style={{ ...styles.primaryBtn, width: "100%" }}>Enviar Pregunta</button>
+          <textarea 
+            value={qnaText}
+            onChange={(e) => setQnaText(e.target.value)}
+            placeholder="Escribe tu pregunta para el expositor aquí..." 
+            style={{ ...styles.adminInput, minHeight: 120, resize: "vertical", marginBottom: 20 }} 
+          />
+          <button 
+            onClick={() => sendResponse(currentBlock, "qna", qnaText)} // Al hacer clic, enviamos el texto
+            style={{ ...styles.primaryBtn, width: "100%", opacity: qnaText.trim() === "" ? 0.5 : 1 }}
+            disabled={qnaText.trim() === ""} // Desactivado si está vacío
+          >
+            Enviar Pregunta
+          </button>
         </div>
       </div>
     );
