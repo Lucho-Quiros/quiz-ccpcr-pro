@@ -46,15 +46,13 @@ function PublicProyector() {
     setActiveBlocks(data || []);
   };
 
+  // --- AJUSTE VISUAL: Pantalla de espera 100% limpia (solo video) ---
   if (!livePres) {
     return (
       <div style={{ ...styles.centerWrap, position: "relative", padding: 0, overflow: "hidden" }}>
         <video autoPlay loop muted playsInline style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }}>
           <source src="https://ydcbwzsttxpixgcbdupu.supabase.co/storage/v1/object/public/recursos/intro.mp4" type="video/mp4" />
         </video>
-        <div style={{ position: "absolute", bottom: 40, zIndex: 1, background: "rgba(0,0,0,0.6)", padding: "15px 40px", borderRadius: 20, textAlign: "center", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}>
-          <p style={{ fontSize: 30, fontWeight: 700, margin: 0, color: "#ffcb2d", letterSpacing: "1px" }}>La charla pronto dará inicio</p>
-        </div>
       </div>
     );
   }
@@ -81,7 +79,6 @@ function PublicProyector() {
                 <h1 style={{ fontSize: 40, marginBottom: 20 }}>🎬 Video Ilustrativo</h1>
                 <div style={{ width: "100%", height: "65vh", background: "#000", borderRadius: 20, overflow: "hidden", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
                   {getYouTubeEmbedUrl(currentBlock.content.url) ? (
-                    {/* IMPLEMENTACIÓN DE AUTOPLAY (Máximos permisos) */}
                     <iframe width="100%" height="100%" src={getYouTubeEmbedUrl(currentBlock.content.url)} frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen></iframe>
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", opacity: 0.5 }}>URL de video inválida o no configurada</div>
@@ -111,7 +108,7 @@ function PublicProyector() {
           </motion.div>
         ) : (
           <motion.div key="end" initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ textAlign: "center" }}>
-            <h1 style={{ fontSize: 48 }}>Fin de la presentación</h1>
+            <h1 style={{ fontSize: 48 }}>Fin de la presentation</h1>
           </motion.div>
         )}
       </AnimatePresence>
@@ -127,6 +124,10 @@ function AdminExpositor() {
   const [presentation, setPresentation] = useState(null);
   const [blocks, setBlocks] = useState([]);
   const [editingBlock, setEditingBlock] = useState(null);
+  
+  // ESTADOS NUEVOS PARA EL TÍTULO EDITABLE
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState("");
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -187,12 +188,13 @@ function AdminExpositor() {
     await supabase.from("presentations").update({ is_live: false }).eq("id", presentation.id);
   };
 
-  // --- FUNCIÓN SEGURA PARA EDITAR EL TÍTULO ---
-  const editTitle = async () => {
-    const newTitle = window.prompt("Escribe el nuevo título de la charla:", presentation.title);
-    if (newTitle !== null && newTitle.trim() !== "") {
-      await supabase.from("presentations").update({ title: newTitle }).eq("id", presentation.id);
+  // --- FUNCIÓN MEJORADA: Guardar Título en Línea ---
+  const saveTitle = async () => {
+    if (tempTitle.trim() !== "" && tempTitle !== presentation.title) {
+      setPresentation({ ...presentation, title: tempTitle }); // Actualización visual instantánea
+      await supabase.from("presentations").update({ title: tempTitle }).eq("id", presentation.id);
     }
+    setIsEditingTitle(false);
   };
 
   if (!presentation) {
@@ -250,10 +252,32 @@ function AdminExpositor() {
 
       <div style={styles.mainContent}>
         <div style={styles.dashboardHeader}>
-          {/* AQUÍ ESTÁ EL TÍTULO EDITABLE */}
-          <h1 onClick={editTitle} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }} title="Haz clic para editar el título">
-            {presentation.title} <span style={{ fontSize: 20, opacity: 0.5 }}>✏️</span>
-          </h1>
+          
+          {/* EL NUEVO SISTEMA DE TÍTULO EDITABLE EN LÍNEA */}
+          {isEditingTitle ? (
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <input 
+                type="text" 
+                value={tempTitle} 
+                onChange={(e) => setTempTitle(e.target.value)} 
+                style={{ ...styles.adminInput, width: "350px", fontSize: 24, fontWeight: "bold", padding: "8px 16px" }} 
+                autoFocus 
+                onKeyDown={(e) => e.key === 'Enter' && saveTitle()}
+              />
+              <button onClick={saveTitle} style={{ ...styles.primaryBtn, padding: "10px 15px", fontSize: 14 }}>Guardar</button>
+              <button onClick={() => setIsEditingTitle(false)} style={{ ...styles.cancelBtn, padding: "10px 15px", fontSize: 14 }}>Cancelar</button>
+            </div>
+          ) : (
+            <h1 
+              onClick={() => { setTempTitle(presentation.title); setIsEditingTitle(true); }} 
+              style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 12, transition: "opacity 0.2s" }} 
+              title="Haz clic para editar el título"
+              onMouseEnter={(e) => e.currentTarget.style.opacity = "0.8"}
+              onMouseLeave={(e) => e.currentTarget.style.opacity = "1"}
+            >
+              {presentation.title} <span style={{ fontSize: 20, opacity: 0.5 }}>✏️</span>
+            </h1>
+          )}
           
           {presentation.is_live ? (
             <div style={{ display: "flex", gap: 15, alignItems: "center", background: "rgba(38, 137, 12, 0.15)", padding: "10px 20px", borderRadius: 12, border: "1px solid #26890c" }}>
@@ -363,7 +387,7 @@ const styles = {
   adminCard: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 24, padding: 40, maxWidth: 420, width: "100%" },
   panelTitle: { fontSize: 32, fontWeight: 800, marginBottom: 24 },
   formGroup: { display: "flex", flexDirection: "column", gap: 16 },
-  adminInput: { width: "100%", padding: "14px 18px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)", color: "#fff", fontSize: 16, fontFamily: "inherit" },
+  adminInput: { width: "100%", padding: "14px 18px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)", color: "#fff", fontSize: 16, fontFamily: "inherit", outline: "none" },
   primaryBtn: { padding: "14px 24px", borderRadius: 12, background: "linear-gradient(135deg,#ffcb2d,#ff8a00)", color: "#3a1078", fontSize: 16, fontWeight: 800, cursor: "pointer", border: "none" },
   cancelBtn: { padding: "14px 24px", borderRadius: 12, background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer", border: "none" },
   deleteBtn: { padding: "10px 16px", borderRadius: 8, background: "rgba(232, 69, 60, 0.15)", color: "#ff827a", border: "1px solid rgba(232, 69, 60, 0.4)", fontSize: 14, fontWeight: 600, cursor: "pointer" },
