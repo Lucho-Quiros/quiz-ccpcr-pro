@@ -20,7 +20,7 @@ const getYouTubeEmbedUrl = (url) => {
 };
 
 // ════════════════════════════════════════════════════════════════════
-//  1. PANTALLA PÚBLICA (Proyector Limpio con Video de Espera)
+//  1. PANTALLA PÚBLICA (Proyector Limpio)
 // ════════════════════════════════════════════════════════════════════
 function PublicProyector() {
   const [livePres, setLivePres] = useState(null);
@@ -46,7 +46,7 @@ function PublicProyector() {
     setActiveBlocks(data || []);
   };
 
-  // --- LA MAGIA DEL VIDEO EN LA SALA DE ESPERA ---
+  // --- AJUSTE VISUAL: Video limpio con texto inferior ---
   if (!livePres) {
     return (
       <div style={{ ...styles.centerWrap, position: "relative", padding: 0, overflow: "hidden" }}>
@@ -55,10 +55,9 @@ function PublicProyector() {
           <source src="https://ydcbwzsttxpixgcbdupu.supabase.co/storage/v1/object/public/recursos/intro.mp4" type="video/mp4" />
         </video>
         
-        {/* El texto superior con fondo oscurecido para que resalte */}
-        <div style={{ position: "relative", zIndex: 1, background: "rgba(0,0,0,0.6)", padding: "40px 60px", borderRadius: 20, textAlign: "center", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}>
-          <h1 style={{ fontSize: 48, marginBottom: 20, color: "#fff" }}>Colegio de Contadores Privados</h1>
-          <p style={{ fontSize: 24, opacity: 0.9, color: "#ffcb2d" }}>Esperando inicio de la charla...</p>
+        {/* El texto centrado en la parte inferior */}
+        <div style={{ position: "absolute", bottom: 80, zIndex: 1, background: "rgba(0,0,0,0.6)", padding: "20px 50px", borderRadius: 20, textAlign: "center", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          <p style={{ fontSize: 36, fontWeight: 700, margin: 0, color: "#ffcb2d", letterSpacing: "1px" }}>La charla pronto dará inicio</p>
         </div>
       </div>
     );
